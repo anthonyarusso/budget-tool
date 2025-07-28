@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict, get_args, Self, NoReturn
+from typing import Literal, TypedDict, get_args, Self, NoReturn, TypeGuard
 import math
 import csv
 from currencies import Currency  # type: ignore
@@ -62,10 +62,10 @@ class _BudgetRow(TypedDict):
     post_tax: _BoolString | Literal[""]
 
 
-def _validate_budget_row(row: _BudgetRow) -> None:
+def _validate_budget_row(row: dict) -> TypeGuard[_BudgetRow]:
     """Run-time check that the input row (dict) is actually valid for use as a _BudgetRow."""
 
-    def _raise_unexpected_value(row: _BudgetRow, column_name: str) -> NoReturn:
+    def _raise_unexpected_value(row: dict, column_name: str) -> NoReturn:
         raise BudgetFileParsingError(
             f"Unexpected value for column '{column_name}': '{row[column_name]}'!"  # type: ignore
         )
@@ -92,25 +92,19 @@ def _validate_budget_row(row: _BudgetRow) -> None:
     ):
         _raise_unexpected_value(row, "recurrence_unit")
 
-    if row["income_or_expense"] == "expense" and row["category"] not in get_args(
-        ExpenseCategory
-    ):
-        _raise_unexpected_value(row, "category")
+    if row["income_or_expense"] == "expense":
+        if row["category"] not in get_args(ExpenseCategory):
+            _raise_unexpected_value(row, "category")
+        if row["priority"] not in get_args(ExpensePriority):
+            _raise_unexpected_value(row, "priority")
 
-    if row["income_or_expense"] == "income" and row["category"] not in get_args(
-        IncomeCategory
-    ):
-        _raise_unexpected_value(row, "category")
+    if row["income_or_expense"] == "income":
+        if row["category"] not in get_args(IncomeCategory):
+            _raise_unexpected_value(row, "category")
+        if row["post_tax"] not in get_args(_BoolString):
+            _raise_unexpected_value(row, "post_tax")
 
-    if row["income_or_expense"] == "expense" and row["priority"] not in get_args(
-        ExpensePriority
-    ):
-        _raise_unexpected_value(row, "priority")
-
-    if row["income_or_expense"] == "income" and row["post_tax"] not in get_args(
-        _BoolString
-    ):
-        _raise_unexpected_value(row, "post_tax")
+    return True
 
 
 @dataclass(kw_only=True)
@@ -146,25 +140,27 @@ class PlannedExpense(_PlannedItem):
         )
 
     @classmethod
-    def from_budget_row(cls, row: _BudgetRow) -> Self:
-        _validate_budget_row(row)
+    def from_budget_row(cls, row: dict) -> Self:
+        if _validate_budget_row(row):
+            if row["recurrence_unit"] == "":
+                recurrence: None | CalendarTime = None
+            else:
+                recurrence = CalendarTime(
+                    int(row["recurrence_value"]),
+                    row["recurrence_unit"],  # type: ignore
+                )
 
-        if row["recurrence_unit"] == "":
-            recurrence: None | CalendarTime = None
-        else:
-            recurrence = CalendarTime(
-                int(row["recurrence_value"]),
-                row["recurrence_unit"],  # type: ignore
+            return cls(
+                name=row["name"],
+                amount=float(row["amount"]),
+                recurrence=recurrence,
+                currency=Currency(row["currency"]),
+                category=row["category"],  # type: ignore
+                priority=row["priority"],  # type: ignore
+                savings_goal=row["savings_goal"],
             )
-
-        return cls(
-            name=row["name"],
-            amount=float(row["amount"]),
-            recurrence=recurrence,
-            currency=Currency(row["currency"]),
-            category=row["category"],  # type: ignore
-            priority=row["priority"],  # type: ignore
-            savings_goal=row["savings_goal"],
+        raise BudgetFileParsingError(
+            "An unspecified error occurred when attempt to parse the budget file!"
         )
 
 
@@ -182,7 +178,7 @@ class PlannedIncome(_PlannedItem):
             "" if self.recurrence is None else self.recurrence.unit
         )
         return _BudgetRow(
-            income_or_expense="expense",
+            income_or_expense="income",
             name=self.name,
             category=self.category,
             amount=f"{self.amount:.2f}",
@@ -195,34 +191,27 @@ class PlannedIncome(_PlannedItem):
         )
 
     @classmethod
-    def from_budget_row(cls, row: _BudgetRow) -> Self:
-        _validate_budget_row(row)
+    def from_budget_row(cls, row: dict) -> Self:
+        if _validate_budget_row(row):
+            if row["recurrence_unit"] == "":
+                recurrence: None | CalendarTime = None
+            else:
+                recurrence = CalendarTime(
+                    int(row["recurrence_value"]),
+                    row["recurrence_unit"],  # type: ignore
+                )
 
-        if row["recurrence_unit"] == "":
-            recurrence: None | CalendarTime = None
-        else:
-            recurrence = CalendarTime(
-                int(row["recurrence_value"]),
-                row["recurrence_unit"],  # type: ignore
+            return cls(
+                name=row["name"],
+                amount=float(row["amount"]),
+                recurrence=recurrence,
+                currency=Currency(row["currency"]),
+                category=row["category"],  # type: ignore
+                post_tax=row["post_tax"],  # type: ignore
             )
 
-        if row["category"] not in get_args(ExpenseCategory):
-            raise BudgetFileParsingError(
-                f"Unexpected value in column 'category' for an expense entry: '{row['category']}'!"
-            )
-
-        if row["priority"] not in get_args(ExpensePriority):
-            raise BudgetFileParsingError(
-                f"Unexpected value in column 'priority' for an expense entry: '{row['priority']}'!"
-            )
-
-        return cls(
-            name=row["name"],
-            amount=float(row["amount"]),
-            recurrence=recurrence,
-            currency=Currency(row["currency"]),
-            category=row["category"],  # type: ignore
-            post_tax=row["post_tax"],  # type: ignore
+        raise BudgetFileParsingError(
+            "An unspecified error occurred when attempt to parse the budget file!"
         )
 
 
@@ -305,12 +294,22 @@ class Budget:
                 writer.writerow(entry.to_budget_row())
 
     @classmethod
-    def import_file(cls, path: str) -> Self:
+    def from_file(cls, path: str) -> Self:
         if not (path.endswith(".csv") or path.endswith(".CSV")):
             raise ValueError("The provided path must point to a file ending in '.csv'!")
+
+        entries: list[PlannedExpense | PlannedIncome] = []
         with open(path, "rt", newline="", encoding="utf-8") as infile:
             csv_reader = csv.DictReader(infile)
             for row in csv_reader:
-                pass
+                if row["income_or_expense"] == "expense":
+                    entries.append(PlannedExpense.from_budget_row(row))
+                elif row["income_or_expense"] == "income":
+                    entries.append(PlannedIncome.from_budget_row(row))
+                else:
+                    raise BudgetFileParsingError(
+                        "Unexpected value for column 'income_or_expense': "
+                        f"'{row['income_or_expense']}'!"
+                    )
 
         return cls()
