@@ -101,6 +101,8 @@ def _validate_budget_row(row: dict) -> TypeGuard[_BudgetRow]:
     if row["income_or_expense"] == "income":
         if row["category"] not in get_args(IncomeCategory):
             _raise_unexpected_value(row, "category")
+
+        row["post_tax"] = str(row["post_tax"]).lower()
         if row["post_tax"] not in get_args(_BoolString):
             _raise_unexpected_value(row, "post_tax")
 
