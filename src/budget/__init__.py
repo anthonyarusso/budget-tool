@@ -1,25 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, TypedDict, get_args
 import math
+import csv
 from currencies import Currency  # type: ignore
 
-from .enums import ExpenseCategory, ExpensePriority, IncomeCategory
+from .typedefs import (
+    ExpenseCategory,
+    ExpensePriority,
+    IncomeCategory,
+)
 
-type CalendarTimeUnits = Literal[
-    "months", "years"
-]  # Literal["days", "weeks", "months", "years"]
-
-
-@dataclass
-class CalendarTime:
-    value: int
-    unit: CalendarTimeUnits
-
-    def __post_init__(self):
-        if self.value <= 0:
-            raise ValueError("Calendar time must be at least one!")
+from .calendar_time import CalendarTime, CalendarTimeUnits
 
 
 def _one_month_factory() -> CalendarTime:
@@ -52,21 +45,74 @@ class _PlannedItem:
                 )
 
 
+class _BudgetRow(TypedDict):
+    income_or_expense: Literal["income", "expense"]
+    name: str
+    category: ExpenseCategory | IncomeCategory
+    amount: str
+    currency: str
+    recurrence_value: str
+    recurrence_unit: CalendarTimeUnits | Literal[""]
+    priority: ExpensePriority | Literal[""]
+    savings_goal: str
+
+
 @dataclass(kw_only=True)
 class PlannedExpense(_PlannedItem):
     """Always used to express planned expenses (or savings contributions), not income."""
 
     category: ExpenseCategory
-    priority: ExpensePriority = ExpensePriority.NECESSITY
+    priority: ExpensePriority = "necessity"
     recurrence: CalendarTime | None = None
     # used to indicate that the "expense" is a savings contribution towards a particular goal
     savings_goal: str | None = None
+
+    def as_budget_row(self) -> _BudgetRow:
+        currency = (
+            "" if self.currency.money_currency is None else self.currency.money_currency
+        )
+        recurrence_value = "" if self.recurrence is None else str(self.recurrence.value)
+        recurrence_unit: CalendarTimeUnits | Literal[""] = (
+            "" if self.recurrence is None else self.recurrence.unit
+        )
+        savings_goal = "" if self.savings_goal is None else self.savings_goal
+        return _BudgetRow(
+            income_or_expense="expense",
+            name=self.name,
+            category=self.category,
+            amount=f"{self.amount:.2f}",
+            currency=currency,
+            recurrence_value=recurrence_value,
+            recurrence_unit=recurrence_unit,
+            priority=self.priority,
+            savings_goal=savings_goal,
+        )
 
 
 @dataclass(kw_only=True)
 class PlannedIncome(_PlannedItem):
     category: IncomeCategory
     post_tax: bool
+
+    def as_budget_row(self) -> _BudgetRow:
+        currency = (
+            "" if self.currency.money_currency is None else self.currency.money_currency
+        )
+        recurrence_value = "" if self.recurrence is None else str(self.recurrence.value)
+        recurrence_unit: CalendarTimeUnits | Literal[""] = (
+            "" if self.recurrence is None else self.recurrence.unit
+        )
+        return _BudgetRow(
+            income_or_expense="expense",
+            name=self.name,
+            category=self.category,
+            amount=f"{self.amount:.2f}",
+            currency=currency,
+            recurrence_value=recurrence_value,
+            recurrence_unit=recurrence_unit,
+            priority="",
+            savings_goal="",
+        )
 
 
 @dataclass(kw_only=True)
@@ -85,7 +131,7 @@ class Budget:
         self.entries: list[PlannedExpense | PlannedIncome] = list(entries)
         self.saving_goals: dict[str, SavingsGoal] = {}
         self.allocations: dict[ExpenseCategory, float] = {
-            k: 0.0 for k in ExpenseCategory
+            k: 0.0 for k in get_args(ExpenseCategory)
         }
 
         for entry in entries:
@@ -129,3 +175,15 @@ class Budget:
                 "without any non-zero monthly expenses registered to the Budget yet!"
             )
         return {k: (v / total) for k, v in self.allocations.items()}
+
+    def export_file(self, path: str) -> None:
+        if not (path.endswith(".csv") or path.endswith(".CSV")):
+            raise ValueError("The provided path must point to a file ending in '.csv'!")
+        with open(path, "wt", newline="", encoding="UTF8") as outfile:
+            writer = csv.writer(outfile)
+
+            # write the CSV headers
+            writer.writerow(_BudgetRow.__annotations__.keys())
+
+            for entry in self.entries:
+                writer.writerow(entry.as_budget_row().values())

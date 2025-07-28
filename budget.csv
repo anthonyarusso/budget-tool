@@ -1,0 +1,19 @@
+income_or_expense,name,category,amount,currency,recurrence_value,recurrence_unit,priority,savings_goal
+expense,Texas Instruments Pay,job,5434.00,USD,1,months,,
+expense,Ken Rent Payment,reimbursement,830.00,USD,1,months,,
+expense,Groceries,groceries,250.00,USD,,,necessity,
+expense,Dry Cat Food,pets,65.00,USD,,,necessity,
+expense,Wet Cat Food,pets,30.00,USD,,,luxury,
+expense,Pet Insurance,pets,120.00,USD,,,necessity,
+expense,Gasoline,automotive,150.00,USD,,,necessity,
+expense,Tollway Budget,automotive,40.00,USD,,,negotiable,
+expense,Car Insurance,automotive,1400.00,USD,6,months,necessity,
+expense,Vehicle Maintenance Savings,automotive,100.00,USD,,,necessity,Vehicle Maintenance
+expense,Student Loan Payment to Dad,loan_payments,200.00,USD,,,necessity,
+expense,Aidvantage Parent PLUS Loan,loan_payments,600.00,USD,,,necessity,
+expense,Edfinancial Direct Loan,loan_payments,400.00,USD,,,necessity,
+expense,Mortgage,housing,2270.00,USD,,,necessity,
+expense,Home Maintenance Savings,housing,300.00,USD,,,necessity,Home Maintenance
+expense,Property Tax,housing,7000.00,USD,1,years,necessity,
+expense,City Utilities,utilities,90.00,USD,,,necessity,
+expense,Power Bill,utilities,160.00,USD,,,necessity,
