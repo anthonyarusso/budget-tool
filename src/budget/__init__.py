@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 import math
 from currencies import Currency  # type: ignore
@@ -22,20 +22,16 @@ class CalendarTime:
             raise ValueError("Calendar time must be at least one!")
 
 
+def _one_month_factory() -> CalendarTime:
+    return CalendarTime(1, "months")
+
+
 @dataclass(kw_only=True)
 class _PlannedItem:
     name: str
     amount: float
-    recurrence: CalendarTime | None = CalendarTime(1, "months")
+    recurrence: CalendarTime | None = field(default_factory=_one_month_factory)
     currency: Currency = Currency("USD")
-
-    def __new__(cls, *args, **kwargs):
-        if cls is _PlannedItem:
-            raise TypeError(
-                "Cannot instantiate the class _PlannedItem directly! "
-                "Please use PlannedExpense or PlannedIncome instead."
-            )
-        return super().__new__(cls, *args, **kwargs)
 
     def __post_init__(self) -> None:
         if self.amount < 0.0:
