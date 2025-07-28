@@ -113,7 +113,6 @@ class PlannedExpense(_PlannedItem):
 
     category: ExpenseCategory
     priority: ExpensePriority = "necessity"
-    recurrence: CalendarTime | None = None
     # used to indicate that the "expense" is a savings contribution towards a particular goal
     savings_goal: str | None = None
 
