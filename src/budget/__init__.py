@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Any
+from typing import Literal
+import math
 from currencies import Currency  # type: ignore
 
 from .enums import ExpenseCategory, ExpensePriority, IncomeCategory
@@ -24,10 +25,21 @@ class CalendarTime:
 @dataclass(kw_only=True)
 class _PlannedItem:
     name: str
-    category: Any
-    currency: Currency
     amount: float
-    recurrence: CalendarTime | None = None
+    recurrence: CalendarTime | None = CalendarTime(1, "months")
+    currency: Currency = Currency("USD")
+
+    def __new__(cls, *args, **kwargs):
+        if cls is _PlannedItem:
+            raise TypeError(
+                "Cannot instantiate the class _PlannedItem directly! "
+                "Please use PlannedExpense or PlannedIncome instead."
+            )
+        return super().__new__(cls, *args, **kwargs)
+
+    def __post_init__(self) -> None:
+        if self.amount < 0.0:
+            raise ValueError("Amount must be non-negative!")
 
     def get_normalized_monthly_amount(self) -> float:
         if self.recurrence is None:
@@ -43,21 +55,13 @@ class _PlannedItem:
                     "Please only use 'months' or 'years' for this field."
                 )
 
-    def __new__(cls, *args, **kwargs):
-        if cls is _PlannedItem:
-            raise TypeError(
-                "Cannot instantiate the class _PlannedItem directly! "
-                "Please use PlannedExpense or PlannedIncome instead."
-            )
-        return super().__new__(cls, *args, **kwargs)
-
 
 @dataclass(kw_only=True)
 class PlannedExpense(_PlannedItem):
     """Always used to express planned expenses (or savings contributions), not income."""
 
     category: ExpenseCategory
-    priority: ExpensePriority
+    priority: ExpensePriority = ExpensePriority.NECESSITY
     recurrence: CalendarTime | None = None
     # used to indicate that the "expense" is a savings contribution towards a particular goal
     savings_goal: str | None = None
@@ -96,17 +100,36 @@ class Budget:
                     "Entries must be either a PlannedExpense or PlannedIncome object!"
                 )
             if isinstance(entry, PlannedExpense):
-                self.allocations[entry.category] += entry.amount
+                self.allocations[entry.category] += (
+                    entry.get_normalized_monthly_amount()
+                )
 
-    def get_monthly_total(self) -> float:
+    def get_monthly_gross(self) -> float:
         """Returns the sum of all income minus the sum of all expenses on a monthly basis. All
         annual items are divided by 12 for this consideration. All multi-month items are divided
         by the number of months they span.
 
         TODO: implement a strategy for dealing with daily & weekly items."""
-        total = 0.0
+        gross = 0.0
         for entry in self.entries:
             sign = -1.0 if isinstance(entry, PlannedExpense) else 1.0
-            total += sign * entry.get_normalized_monthly_amount()
+            gross += sign * entry.get_normalized_monthly_amount()
 
-        return total
+        return gross
+
+    def get_total_monthly_expense(self) -> float:
+        total_expense: float = 0.0
+        for entry in self.entries:
+            if isinstance(entry, PlannedExpense):
+                total_expense += entry.amount
+
+        return total_expense
+
+    def get_monthly_expenses_as_fraction(self) -> dict[ExpenseCategory, float]:
+        total = self.get_total_monthly_expense()
+        if math.isclose(total, 0.0):
+            raise RuntimeError(
+                "Attempted to call 'get_monthly_expenses_as_fraction()' "
+                "without any non-zero monthly expenses registered to the Budget yet!"
+            )
+        return {k: (v / total) for k, v in self.allocations.items()}

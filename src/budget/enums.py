@@ -19,6 +19,7 @@ class ExpenseCategory(Enum):
     LOAN_PAYMENTS = auto()  # repaying loans that were made to yourself
     MEDICAL = auto()
     PETS = auto()
+    RAINY_DAY = auto()
     RENT = auto()
     TRAVEL = auto()
     UTILITIES = auto()
