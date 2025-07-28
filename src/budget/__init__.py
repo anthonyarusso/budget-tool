@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict, get_args
+from typing import Literal, TypedDict, get_args, Self, NoReturn
 import math
 import csv
 from currencies import Currency  # type: ignore
@@ -11,7 +11,7 @@ from .typedefs import (
     ExpensePriority,
     IncomeCategory,
 )
-
+from .errors import BudgetFileParsingError
 from .calendar_time import CalendarTime, CalendarTimeUnits
 
 
@@ -45,8 +45,12 @@ class _PlannedItem:
                 )
 
 
+_IncomeOrExpense = Literal["income", "expense"]
+_BoolString = Literal["true", "false"]
+
+
 class _BudgetRow(TypedDict):
-    income_or_expense: Literal["income", "expense"]
+    income_or_expense: _IncomeOrExpense
     name: str
     category: ExpenseCategory | IncomeCategory
     amount: str
@@ -55,6 +59,58 @@ class _BudgetRow(TypedDict):
     recurrence_unit: CalendarTimeUnits | Literal[""]
     priority: ExpensePriority | Literal[""]
     savings_goal: str
+    post_tax: _BoolString | Literal[""]
+
+
+def _validate_budget_row(row: _BudgetRow) -> None:
+    """Run-time check that the input row (dict) is actually valid for use as a _BudgetRow."""
+
+    def _raise_unexpected_value(row: _BudgetRow, column_name: str) -> NoReturn:
+        raise BudgetFileParsingError(
+            f"Unexpected value for column '{column_name}': '{row[column_name]}'!"  # type: ignore
+        )
+
+    for k in _BudgetRow.__annotations__.keys():
+        if k not in row:
+            raise BudgetFileParsingError(
+                f"The required column header, {k}, was not present in the provided CSV file!"
+            )
+
+    if row["income_or_expense"] not in get_args(_IncomeOrExpense):
+        _raise_unexpected_value(row, "income_or_expense")
+
+    if (row["recurrence_unit"] == "" and row["recurrence_value"] != "") or (
+        row["recurrence_unit"] != "" and row["recurrence_value"] == ""
+    ):
+        raise BudgetFileParsingError(
+            "Either both the recurrence_unit and recurrence_value "
+            "columns must be blank or neither must be!"
+        )
+
+    if row["recurrence_unit"] != "" and row["recurrence_unit"] not in get_args(
+        CalendarTimeUnits
+    ):
+        _raise_unexpected_value(row, "recurrence_unit")
+
+    if row["income_or_expense"] == "expense" and row["category"] not in get_args(
+        ExpenseCategory
+    ):
+        _raise_unexpected_value(row, "category")
+
+    if row["income_or_expense"] == "income" and row["category"] not in get_args(
+        IncomeCategory
+    ):
+        _raise_unexpected_value(row, "category")
+
+    if row["income_or_expense"] == "expense" and row["priority"] not in get_args(
+        ExpensePriority
+    ):
+        _raise_unexpected_value(row, "priority")
+
+    if row["income_or_expense"] == "income" and row["post_tax"] not in get_args(
+        _BoolString
+    ):
+        _raise_unexpected_value(row, "post_tax")
 
 
 @dataclass(kw_only=True)
@@ -67,7 +123,7 @@ class PlannedExpense(_PlannedItem):
     # used to indicate that the "expense" is a savings contribution towards a particular goal
     savings_goal: str | None = None
 
-    def as_budget_row(self) -> _BudgetRow:
+    def to_budget_row(self) -> _BudgetRow:
         currency = (
             "" if self.currency.money_currency is None else self.currency.money_currency
         )
@@ -86,6 +142,29 @@ class PlannedExpense(_PlannedItem):
             recurrence_unit=recurrence_unit,
             priority=self.priority,
             savings_goal=savings_goal,
+            post_tax="",
+        )
+
+    @classmethod
+    def from_budget_row(cls, row: _BudgetRow) -> Self:
+        _validate_budget_row(row)
+
+        if row["recurrence_unit"] == "":
+            recurrence: None | CalendarTime = None
+        else:
+            recurrence = CalendarTime(
+                int(row["recurrence_value"]),
+                row["recurrence_unit"],  # type: ignore
+            )
+
+        return cls(
+            name=row["name"],
+            amount=float(row["amount"]),
+            recurrence=recurrence,
+            currency=Currency(row["currency"]),
+            category=row["category"],  # type: ignore
+            priority=row["priority"],  # type: ignore
+            savings_goal=row["savings_goal"],
         )
 
 
@@ -94,7 +173,7 @@ class PlannedIncome(_PlannedItem):
     category: IncomeCategory
     post_tax: bool
 
-    def as_budget_row(self) -> _BudgetRow:
+    def to_budget_row(self) -> _BudgetRow:
         currency = (
             "" if self.currency.money_currency is None else self.currency.money_currency
         )
@@ -112,14 +191,49 @@ class PlannedIncome(_PlannedItem):
             recurrence_unit=recurrence_unit,
             priority="",
             savings_goal="",
+            post_tax="true" if self.post_tax else "false",
+        )
+
+    @classmethod
+    def from_budget_row(cls, row: _BudgetRow) -> Self:
+        _validate_budget_row(row)
+
+        if row["recurrence_unit"] == "":
+            recurrence: None | CalendarTime = None
+        else:
+            recurrence = CalendarTime(
+                int(row["recurrence_value"]),
+                row["recurrence_unit"],  # type: ignore
+            )
+
+        if row["category"] not in get_args(ExpenseCategory):
+            raise BudgetFileParsingError(
+                f"Unexpected value in column 'category' for an expense entry: '{row['category']}'!"
+            )
+
+        if row["priority"] not in get_args(ExpensePriority):
+            raise BudgetFileParsingError(
+                f"Unexpected value in column 'priority' for an expense entry: '{row['priority']}'!"
+            )
+
+        return cls(
+            name=row["name"],
+            amount=float(row["amount"]),
+            recurrence=recurrence,
+            currency=Currency(row["currency"]),
+            category=row["category"],  # type: ignore
+            post_tax=row["post_tax"],  # type: ignore
         )
 
 
-@dataclass(kw_only=True)
-class SavingsGoal:
-    name: str
-    timeline: CalendarTime
-    amount: float
+# TODO: implement a more sophisticated SavingsGoal class with CSV support.
+# @dataclass(kw_only=True)
+# class SavingsGoal:
+#     name: str
+#     timeline: CalendarTime
+#     amount: float
+
+SavingsGoal = str
 
 
 class Budget:
@@ -179,11 +293,24 @@ class Budget:
     def export_file(self, path: str) -> None:
         if not (path.endswith(".csv") or path.endswith(".CSV")):
             raise ValueError("The provided path must point to a file ending in '.csv'!")
-        with open(path, "wt", newline="", encoding="UTF8") as outfile:
-            writer = csv.writer(outfile)
+        with open(path, "wt", newline="", encoding="utf-8") as outfile:
+            writer = csv.DictWriter(
+                outfile, fieldnames=_BudgetRow.__annotations__.keys()
+            )
 
             # write the CSV headers
-            writer.writerow(_BudgetRow.__annotations__.keys())
+            writer.writeheader()
 
             for entry in self.entries:
-                writer.writerow(entry.as_budget_row().values())
+                writer.writerow(entry.to_budget_row())
+
+    @classmethod
+    def import_file(cls, path: str) -> Self:
+        if not (path.endswith(".csv") or path.endswith(".CSV")):
+            raise ValueError("The provided path must point to a file ending in '.csv'!")
+        with open(path, "rt", newline="", encoding="utf-8") as infile:
+            csv_reader = csv.DictReader(infile)
+            for row in csv_reader:
+                pass
+
+        return cls()

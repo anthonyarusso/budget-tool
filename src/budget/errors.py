@@ -1,0 +1,2 @@
+class BudgetFileParsingError(Exception):
+    pass
