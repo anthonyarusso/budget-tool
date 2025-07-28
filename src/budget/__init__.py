@@ -312,4 +312,4 @@ class Budget:
                         f"'{row['income_or_expense']}'!"
                     )
 
-        return cls()
+        return cls(*entries)
